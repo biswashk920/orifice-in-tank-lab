@@ -1,0 +1,179 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Orifice in a Tank - 3D</title>
+<style>
+:root{--bg:#f2f6f9;--card:#fff;--ink:#16314a;--mut:#58708a;--blue:#1d74c4;--line:#d3dde7}
+@media(prefers-color-scheme:dark){:root{--bg:#0e1620;--card:#172330;--ink:#e5eef7;--mut:#92a7bc;--line:#2a3a4b}}
+*{box-sizing:border-box}body{margin:0;font-family:system-ui,sans-serif;background:var(--bg);color:var(--ink)}
+header{padding:14px 20px 8px}h1{margin:0;font-size:1.3rem}header p{margin:4px 0 0;color:var(--mut);font-size:.9rem}a{color:var(--blue)}
+main{display:grid;grid-template-columns:minmax(0,3fr) minmax(0,1fr);gap:14px;padding:6px 20px 20px}
+@media(max-width:900px){main{grid-template-columns:1fr}}
+.card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:12px}
+#wrap{position:relative;overflow:hidden;border-radius:6px}canvas{display:block;touch-action:none;cursor:grab}
+.lab{position:absolute;transform:translate(-50%,-50%);font:12px system-ui;background:rgba(255,255,255,.85);color:#16314a;padding:1px 6px;border-radius:4px;pointer-events:none;white-space:nowrap}
+.inputs{display:grid;grid-template-columns:repeat(auto-fill,minmax(145px,1fr));gap:8px;margin-top:10px}
+label{font-size:.78rem;color:var(--mut);display:flex;flex-direction:column;gap:3px}
+label.c{flex-direction:row;align-items:center;gap:5px;color:var(--ink)}
+input,select,button{font:inherit;padding:6px;border:1px solid var(--line);border-radius:6px;background:var(--bg);color:var(--ink)}
+input[type=checkbox]{padding:0}
+button{cursor:pointer;background:var(--blue);color:#fff;border:0;padding:7px 12px}button.alt{background:var(--bg);color:var(--ink);border:1px solid var(--line)}
+:focus-visible{outline:2px solid var(--blue);outline-offset:2px}
+.row{display:flex;gap:10px;align-items:end;flex-wrap:wrap;margin-top:10px}
+.res{display:grid;grid-template-columns:1fr;gap:8px;margin-bottom:10px}
+.res div{border:1px solid var(--line);border-radius:8px;padding:8px}.res small{display:block;color:var(--mut);font-size:.74rem}.res b{font-size:1.1rem}
+#note{font-size:.8rem;color:var(--mut);margin:8px 0 0}
+</style>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script src="physics.js"></script></head><body>
+<header><h1>Orifice in a tank <span style="color:var(--mut);font-weight:400">· 3D</span></h1>
+<p>Drag to rotate, scroll to zoom. <a href="index.html">2D version with the head vs. time graph</a></p></header>
+<main>
+<section class="card">
+<div id="wrap"><div id="lb"></div></div>
+<div class="row">
+<button id="play">Pause</button><button id="reset" class="alt">Reset</button>
+<button class="alt" data-v="3d">3D view</button><button class="alt" data-v="side">Side</button><button class="alt" data-v="top">Top</button><button class="alt" data-v="close">Orifice close-up</button><button class="alt" id="shot">Screenshot</button>
+<label>Speed <span id="spv"></span><input id="speed" type="range" min="-1" max="3" step="0.05" value="0"></label>
+</div>
+<div class="row">
+<label class="c"><input type="checkbox" id="t_p" checked>Pressure arrows</label><label class="c"><input type="checkbox" id="t_s" checked>Streamlines</label>
+<label class="c"><input type="checkbox" id="t_d" checked>Dimensions</label><label class="c"><input type="checkbox" id="t_c">Cut-away</label>
+</div>
+<div class="inputs">
+<label>Mode<select id="mode"><option value="drain">Draining tank</option><option value="const">Constant head</option></select></label>
+<label>Head above orifice centre (m)<input id="head" type="number" value="1.5" min="0.05" step="0.1"></label>
+<label>Orifice shape<select id="shape"><option value="circle">Circle</option><option value="square">Square</option><option value="rectangle">Rectangle</option><option value="triangle">Triangle</option></select></label>
+<label><span id="la">Diameter (cm)</span><input id="dimA" type="number" value="5" min="0.5" step="0.5"></label>
+<label id="wb"><span id="lb2">Height (cm)</span><input id="dimB" type="number" value="5" min="0.5" step="0.5"></label>
+<label>Orifice bottom above ground (m)<input id="zb" type="number" value="1" min="0.05" step="0.1"></label>
+<label>Tank diameter (m)<input id="tank" type="number" value="1" min="0.1" step="0.1"></label>
+<label>Cd preset<select id="preset"><option value="0.61">Sharp-edged (0.61)</option><option value="0.98">Rounded (0.98)</option><option value="custom">Custom</option></select></label>
+<label>Discharge coefficient Cd<input id="cd" type="number" value="0.61" min="0.1" max="1" step="0.01"></label>
+</div>
+</section>
+<section class="card">
+<div class="res">
+<div><small>Head now</small><b id="r_h"></b></div><div><small>Jet velocity</small><b id="r_v"></b></div>
+<div><small>Discharge Q</small><b id="r_q"></b></div><div><small>Jet lands at</small><b id="r_r"></b></div>
+<div><small>Time to empty</small><b id="r_te"></b></div><div><small>Elapsed / water used</small><b id="r_t"></b></div>
+</div>
+<p id="note">Jet colour shows speed (blue = slow, red = fast). The jet narrows after the orifice (vena contracta) and thins as it speeds up while falling. Pressure arrows grow with depth. Non-circular jets are drawn with an equal-area round cross-section. Same equations as the Python package.</p>
+</section>
+</main>
+<script>
+const $=id=>document.getElementById(id),wrap=$('wrap');
+const LAB={circle:['Diameter (cm)'],square:['Side (cm)'],rectangle:['Width (cm)','Height (cm)'],triangle:['Base (cm)','Height (cm)']};
+const R3=new THREE.WebGLRenderer({antialias:true,preserveDrawingBuffer:true});R3.setPixelRatio(Math.min(devicePixelRatio,2));
+R3.shadowMap.enabled=true;R3.localClippingEnabled=true;wrap.prepend(R3.domElement);
+const scene=new THREE.Scene(),cam=new THREE.PerspectiveCamera(40,1,.02,300),V3=(x,y,z)=>new THREE.Vector3(x,y,z);
+scene.background=new THREE.Color(0xc4d8e8);scene.fog=new THREE.Fog(0xc4d8e8,25,90);
+scene.add(new THREE.HemisphereLight(0xffffff,0x71889c,.95));
+const sun=new THREE.DirectionalLight(0xffffff,.9);sun.position.set(5,9,6);sun.castShadow=true;sun.shadow.mapSize.set(2048,2048);scene.add(sun,sun.target);
+const clip=new THREE.Plane(V3(0,0,-1),1e3),O={az:.7,el:.35,d:5,t:V3(0,0,0)};
+// ---- orbit: drag = rotate, wheel = zoom
+let drag=null;const cv=R3.domElement;
+cv.onpointerdown=e=>{drag=[e.clientX,e.clientY];cv.setPointerCapture(e.pointerId);cv.style.cursor='grabbing';};
+cv.onpointerup=()=>{drag=null;cv.style.cursor='grab';};
+cv.onpointermove=e=>{if(!drag)return;O.az-=(e.clientX-drag[0])*.006;O.el=Math.max(-.05,Math.min(1.55,O.el+(e.clientY-drag[1])*.006));drag=[e.clientX,e.clientY];};
+cv.addEventListener('wheel',e=>{e.preventDefault();O.d=Math.min(80,Math.max(.25,O.d*Math.exp(e.deltaY*.001)));},{passive:false});
+function placeCam(){cam.position.set(O.t.x+O.d*Math.cos(O.el)*Math.sin(O.az),O.t.y+O.d*Math.sin(O.el),O.t.z+O.d*Math.cos(O.el)*Math.cos(O.az));cam.lookAt(O.t);}
+const VW={'3d':[.7,.35],side:[0,.05],top:[0,1.5],close:[.9,.15]};
+function view(n){O.az=VW[n][0];O.el=VW[n][1];if(n==='close'){O.d=Math.max(.5,g.H*9);O.t.set(Rr,P.zb+g.yc,0);}else{O.d=ext*1.7;O.t.set(cx,cy,0);}}
+// ---- labels
+const LB={};function lab(k,txt,p,show){let d=LB[k];if(!d){d=LB[k]=document.createElement('div');d.className='lab';$('lb').appendChild(d);}
+ const q=p.clone().project(cam);d.style.display=show&&q.z<1?'':'none';d.textContent=txt;d.style.left=(q.x+1)/2*wrap.clientWidth+'px';d.style.top=(1-q.y)/2*wrap.clientHeight+'px';}
+function read(){const n=(id,min)=>Math.max(+$(id).value||0,min);
+ return{sh:$('shape').value,a:n('dimA',.5)/100,b:n('dimB',.5)/100,h:n('head',.05),D:n('tank',.1),zb:n('zb',.05),cd:Math.min(Math.max(+$('cd').value||.61,.1),1),mode:$('mode').value};}
+let P,g,L0,Rr,sim,tEnd,t=0,playing=true,speed=1,world,ext,cx,cy,W={};
+// tank wall with a real hole cut in the shape of the orifice
+function wallGeo(wt){const zb=P.zb;let wm=0;for(let i=0;i<=40;i++)wm=Math.max(wm,g.w(g.H*i/40));
+ const th=Math.min(1.2,.65*wm/Rr+.03),ths=[],lin=(a,b,n)=>{for(let i=0;i<n;i++)ths.push(a+(b-a)*i/n)};
+ lin(-Math.PI,-th,50);lin(-th,th,90);lin(th,Math.PI,50);ths.push(Math.PI);
+ const Hc=Math.min(g.H,wt-zb),ys=[];for(let i=0;i<=50;i++)ys.push(zb+Hc*i/50);for(let i=1;i<=14;i++)ys.push(zb+Hc+(wt-zb-Hc)*i/14);
+ const pos=[],idx=[],nt=ths.length;ys.forEach(y=>ths.forEach(a=>pos.push(Rr*Math.cos(a),y,Rr*Math.sin(a))));
+ for(let j=0;j<ys.length-1;j++)for(let i=0;i<nt-1;i++){const a=(ths[i]+ths[i+1])/2,s=(ys[j]+ys[j+1])/2-zb;
+  if(s<g.H&&Math.abs(Rr*a)<g.w(s)/2)continue;const p=j*nt+i;idx.push(p,p+1,p+nt,p+1,p+nt+1,p+nt);}
+ const B=new THREE.BufferGeometry();B.setAttribute('position',new THREE.Float32BufferAttribute(pos,3));B.setIndex(idx);B.computeVertexNormals();return B;}
+function setup(){
+ P=read();g=geom(P.sh,P.a,P.b);L0=P.h+g.yc;Rr=P.D/2;
+ sim=P.mode==='drain'?drain(L0,P.D,g,P.cd):{T:[0],L:[L0]};tEnd=sim.T[sim.T.length-1];
+ const f=flow(L0,g,P.cd,300),v0=f.A>0?CV*f.q/(P.cd*f.A):0,y0=P.zb+Math.min(g.yc,L0/2),R0=v0*Math.sqrt(2*y0/G),zb=P.zb;
+ W.vmax=Math.hypot(v0,Math.sqrt(2*G*y0))||1;ext=Math.max(P.D+R0*1.1,zb+L0*1.2);cx=R0/2;cy=(zb+L0)/2;
+ const sc=ext*.9;Object.assign(sun.shadow.camera,{left:-sc,right:sc,top:sc,bottom:-sc,near:1,far:60});sun.shadow.camera.updateProjectionMatrix();sun.target.position.set(cx,0,0);
+ if(world){scene.remove(world);world.traverse(o=>{if(o.geometry)o.geometry.dispose();});}
+ world=new THREE.Group();scene.add(world);
+ const wt=zb+L0*1.12+.05,add=(m,c=true)=>{m.castShadow=c;m.receiveShadow=true;world.add(m);return m},
+  std=(c,o={})=>new THREE.MeshStandardMaterial(Object.assign({color:c,roughness:.5},o)),cyl=(r,h,m)=>new THREE.Mesh(new THREE.CylinderGeometry(r,r,h,64),m);
+ add(new THREE.Mesh(new THREE.PlaneGeometry(160,160),std(0xe6ecf2)),false).rotation.x=-Math.PI/2;
+ add(cyl(Rr+.1,Math.max(zb-.03,.01),std(0x8996a4))).position.y=Math.max(zb-.03,.01)/2;
+ add(cyl(Rr,.03,std(0xaab6c2))).position.y=zb-.015;
+ add(new THREE.Mesh(wallGeo(wt),std(0xdff1ff,{transparent:true,opacity:.2,roughness:.05,metalness:.2,side:THREE.DoubleSide,depthWrite:false,clippingPlanes:[clip]})),false);
+ // dark rim around the hole
+ const pts=[],N=90;for(let i=0;i<=N;i++){const s=g.H*i/N;pts.push([-g.w(s)/2,s]);}for(let i=N;i>=0;i--){const s=g.H*i/N;pts.push([g.w(s)/2,s]);}
+ const rim=[];pts.forEach((A,i)=>{const B=pts[(i+1)%pts.length],n=Math.max(1,Math.ceil(Math.hypot(B[0]-A[0],B[1]-A[1])/.004));for(let k=0;k<n;k++)rim.push(V3(Rr*1.004*Math.cos((A[0]+(B[0]-A[0])*k/n)/Rr),zb+A[1]+(B[1]-A[1])*k/n,Rr*1.004*Math.sin((A[0]+(B[0]-A[0])*k/n)/Rr)));});
+ world.add(new THREE.Points(new THREE.BufferGeometry().setFromPoints(rim),new THREE.PointsMaterial({color:0x2b3a4a,size:Math.min(.01,Math.max(.002,g.H*.05))})));
+ W.water=add(cyl(Rr-.004,1,std(0x2a8fe0,{transparent:true,opacity:.6,roughness:.12,depthWrite:false,clippingPlanes:[clip]})),false);
+ // jet tube
+ const NJ=48,M=14,idx=[];for(let i=0;i<NJ;i++)for(let k=0;k<M;k++){const a=i*M+k,b=i*M+(k+1)%M;idx.push(a,b,a+M,b,b+M,a+M);}
+ const jg=new THREE.BufferGeometry();jg.setAttribute('position',new THREE.BufferAttribute(new Float32Array((NJ+1)*M*3),3));jg.setAttribute('color',new THREE.BufferAttribute(new Float32Array((NJ+1)*M*3),3));jg.setIndex(idx);
+ W.NJ=NJ;W.M=M;W.jet=add(new THREE.Mesh(jg,new THREE.MeshStandardMaterial({vertexColors:true,transparent:true,opacity:.85,roughness:.2,side:THREE.DoubleSide})));W.jet.frustumCulled=false;
+ const P3=(n,s,c,o=.9)=>{const gm=new THREE.BufferGeometry();gm.setAttribute('position',new THREE.BufferAttribute(new Float32Array(n*3),3));const p=new THREE.Points(gm,new THREE.PointsMaterial({size:s,color:c,transparent:true,opacity:o}));p.frustumCulled=false;world.add(p);return p;};
+ W.NP=2200;W.pts=P3(W.NP,.018,0xcfeaff);W.tau=Float32Array.from({length:W.NP},Math.random);W.rnd=Float32Array.from({length:W.NP*3},Math.random);
+ W.sp=P3(300,.016,0xffffff);W.sp.geometry.attributes.position.array.fill(-10);W.sv=new Float32Array(900);W.si=0;
+ W.st=P3(6*26,.022,0xffffff,.95);W.ph=0;
+ W.pud=new THREE.Mesh(new THREE.CircleGeometry(1,40),std(0x2a8fe0,{transparent:true,opacity:.55}));W.pud.rotation.x=-Math.PI/2;W.pud.position.y=.004;world.add(W.pud);
+ W.ar=new THREE.Group();for(let k=0;k<6;k++)W.ar.add(new THREE.ArrowHelper(V3(-1,0,0),V3(0,0,0),.3,0xf08a24,.06,.04));world.add(W.ar);
+ // dimensions: head/height lines + ground tape
+ W.dg=new THREE.Group();world.add(W.dg);const lm=new THREE.LineBasicMaterial({color:0x16314a}),ls=a=>{const l=new THREE.LineSegments(new THREE.BufferGeometry().setAttribute('position',new THREE.Float32BufferAttribute(a,3)),lm);l.frustumCulled=false;W.dg.add(l);return l;};
+ W.hl=ls(new Array(12).fill(0));const stp=R0>3?.5:R0>1?.25:.1,tp=[Rr,.012,.15,Rr+R0*1.1,.012,.15];for(let x=stp;x<=R0*1.1;x+=stp)tp.push(Rr+x,.012,.15,Rr+x,.012,.22);ls(tp);
+}
+function upd(L,h,q,A,v,y0,R,used,dv){const zb=P.zb,NJ=W.NJ,M=W.M;
+ W.water.scale.y=Math.max(L,.001);W.water.position.y=zb+L/2;clip.constant=$('t_c').checked?0:1e3;
+ const on=v>.02&&q>0;W.jet.visible=on;W.pts.visible=on;
+ if(on){const T=Math.sqrt(2*y0/G),r0=Math.sqrt(A/Math.PI),rc=Math.sqrt(q/v/Math.PI),jg=W.jet.geometry,p=jg.attributes.position.array,c=jg.attributes.color.array,col=new THREE.Color();
+  for(let i=0;i<=NJ;i++){const tau=T*i/NJ,sp=Math.hypot(v,G*tau),nx=G*tau/sp,ny=v/sp,x=Rr+v*tau,y=y0-.5*G*tau*tau,
+   r=(rc+(r0-rc)*Math.exp(-v*tau/(1.2*r0+1e-4)))*Math.sqrt(v/sp);col.setHSL(.62*(1-Math.min(1,sp/W.vmax)),.85,.5);
+   for(let k=0;k<M;k++){const a=k/M*6.2832,j=(i*M+k)*3;p[j]=x+r*Math.cos(a)*nx;p[j+1]=y+r*Math.cos(a)*ny;p[j+2]=r*Math.sin(a);c[j]=col.r;c[j+1]=col.g;c[j+2]=col.b;}}
+  jg.attributes.position.needsUpdate=jg.attributes.color.needsUpdate=true;jg.computeVertexNormals();
+  const pa=W.pts.geometry.attributes.position.array;
+  for(let i=0;i<W.NP;i++){W.tau[i]+=dv/T;if(W.tau[i]>=1){W.tau[i]=0;for(let k=0;k<3;k++)W.rnd[i*3+k]=Math.random();if(Math.random()<.12)splash(Rr+v*T,v);}
+   const tau=W.tau[i]*T,sp=rc*(.4+1.2*W.rnd[i*3])+W.rnd[i*3+2]*tau*.12,b=W.rnd[i*3+1]*6.283;
+   pa[i*3]=Rr+v*tau;pa[i*3+1]=y0-.5*G*tau*tau+sp*Math.cos(b);pa[i*3+2]=sp*Math.sin(b);}
+  W.pts.geometry.attributes.position.needsUpdate=true;}
+ const s=W.sp.geometry.attributes.position.array,w=W.sv;
+ for(let i=0;i<900;i+=3)if(s[i+1]>-5){s[i]+=w[i]*dv;s[i+1]+=w[i+1]*dv;s[i+2]+=w[i+2]*dv;w[i+1]-=G*dv;if(s[i+1]<0)s[i+1]=-10;}
+ W.sp.geometry.attributes.position.needsUpdate=true;
+ W.pud.visible=on;W.pud.position.x=Rr+R;W.pud.scale.setScalar(Math.max(.04,Math.min(2.5,Math.sqrt(used/(Math.PI*.02)))));
+ W.ar.visible=$('t_p').checked;
+ W.ar.children.forEach((a,k)=>{const d=L*(k+.5)/6;a.position.set(-Rr,zb+L-d,0);a.setLength(Math.max(.03,.3*d),.06,.04);});
+ W.st.visible=$('t_s').checked;
+ if(W.st.visible){W.ph=(W.ph+dv*.35*Math.min(2,v/3+.2))%1;const a=W.st.geometry.attributes.position.array;let n=0;
+  for(let k=0;k<6;k++){const S=V3(-Rr*.8+k*Rr*.28,zb+L*.96,Rr*.45*Math.sin(k*2.3)),E=V3(Rr,y0,0),C=V3(Rr*.35,y0+(S.y-y0)*.12,S.z*.4);
+   for(let d=0;d<26;d++){const u=(d/26+W.ph)%1,m=1-u;a[n++]=m*m*S.x+2*m*u*C.x+u*u*E.x;a[n++]=m*m*S.y+2*m*u*C.y+u*u*E.y;a[n++]=m*m*S.z+2*m*u*C.z+u*u*E.z;}}
+  W.st.geometry.attributes.position.needsUpdate=true;}
+ const zf=Rr+.15,d=$('t_d').checked,a=W.hl.geometry.attributes.position.array;W.dg.visible=d;
+ a.set([0,y0,zf,0,zb+L,zf,0,0,zf,0,zb,zf]);W.hl.geometry.attributes.position.needsUpdate=true;
+ lab('h','head '+h.toFixed(2)+' m',V3(0,(y0+zb+L)/2,zf),d);lab('z','height '+zb.toFixed(2)+' m',V3(0,zb/2,zf),d);
+ lab('r','range '+R.toFixed(2)+' m',V3(Rr+R/2,.1,.3),d&&on);lab('p',(9.81*L).toFixed(1)+' kPa at base',V3(-Rr-.45,zb+.04,0),$('t_p').checked);}
+function splash(x,v){const i=(W.si=(W.si+1)%300)*3,s=W.sp.geometry.attributes.position.array,w=W.sv;
+ s[i]=x;s[i+1]=.01;s[i+2]=(Math.random()-.5)*.1;w[i]=v*(.1+.3*Math.random());w[i+1]=.8+Math.random()*1.6;w[i+2]=(Math.random()-.5)*1.5;}
+let last=performance.now();
+function frame(now){const dt=Math.min((now-last)/1000,.1);last=now;
+ if(playing){t+=dt*speed;if(P.mode==='drain'&&t>=tEnd){t=tEnd;playing=false;$('play').textContent='Play';}}
+ const L=levelAt(sim,t),h=L-g.yc,{q,A}=flow(L,g,P.cd,80),v=A>0?CV*q/(P.cd*A):0,y0=P.zb+Math.min(g.yc,L/2),R=v*Math.sqrt(2*y0/G),
+  used=P.mode==='drain'?Math.PI*P.D*P.D/4*(L0-L):q*t;
+ upd(L,h,q,A,v,y0,R,used,playing?dt*Math.min(speed,1):0);placeCam();R3.render(scene,cam);
+ $('r_h').textContent=h.toFixed(2)+' m';$('r_v').textContent=v.toFixed(2)+' m/s';$('r_q').textContent=(q*1000).toFixed(2)+' L/s';$('r_r').textContent=R.toFixed(2)+' m';
+ $('r_te').textContent=P.mode==='drain'?fmtT(tEnd):'not draining';$('r_t').textContent=fmtT(t)+' / '+used.toFixed(2)+' m³';$('spv').textContent='×'+speed.toFixed(speed<10?1:0);
+ requestAnimationFrame(frame);}
+function labels(){const l=LAB[$('shape').value];$('la').textContent=l[0];$('wb').style.display=l.length>1?'':'none';$('lb2').textContent=l[1]||'';}
+function fresh(){setup();const sp=P.mode==='drain'?Math.max(1,tEnd/20):1;$('speed').value=Math.min(3,Math.max(-1,Math.log10(sp)));speed=Math.pow(10,+$('speed').value);t=0;playing=true;$('play').textContent='Pause';}
+function rs(){const w=wrap.clientWidth,h=Math.round(w*.62);R3.setSize(w,h);cam.aspect=w/h;cam.updateProjectionMatrix();}
+$('play').onclick=()=>{if(!playing&&P.mode==='drain'&&t>=tEnd)t=0;playing=!playing;$('play').textContent=playing?'Pause':'Play';};
+$('reset').onclick=()=>{fresh();view('3d');};$('speed').oninput=()=>{speed=Math.pow(10,+$('speed').value);};
+$('shape').onchange=()=>{labels();fresh();};$('preset').onchange=()=>{if($('preset').value!=='custom')$('cd').value=$('preset').value;fresh();};
+$('cd').oninput=()=>{$('preset').value='custom';};['mode','head','dimA','dimB','zb','tank','cd'].forEach(id=>$(id).addEventListener('change',fresh));
+document.querySelectorAll('[data-v]').forEach(b=>b.onclick=()=>view(b.dataset.v));
+$('shot').onclick=()=>{R3.render(scene,cam);const a=document.createElement('a');a.href=cv.toDataURL('image/png');a.download='orifice-3d.png';a.click();};
+addEventListener('resize',rs);rs();labels();fresh();view('3d');requestAnimationFrame(frame);
+</script></body></html>

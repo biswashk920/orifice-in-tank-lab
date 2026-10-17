@@ -1,0 +1,149 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Orifice in a Tank</title>
+<style>
+:root{--bg:#f2f6f9;--card:#fff;--ink:#16314a;--mut:#58708a;--blue:#1d74c4;--line:#d3dde7}
+@media(prefers-color-scheme:dark){:root{--bg:#0e1620;--card:#172330;--ink:#e5eef7;--mut:#92a7bc;--line:#2a3a4b}}
+*{box-sizing:border-box}body{margin:0;font-family:system-ui,sans-serif;background:var(--bg);color:var(--ink)}
+header{padding:14px 20px 8px}h1{margin:0;font-size:1.3rem}header p{margin:4px 0 0;color:var(--mut);font-size:.9rem}
+main{display:grid;grid-template-columns:minmax(0,3fr) minmax(0,2fr);gap:14px;padding:6px 20px 20px}
+@media(max-width:900px){main{grid-template-columns:1fr}}
+.card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:12px}
+canvas{width:100%;display:block;border-radius:6px}
+.inputs{display:grid;grid-template-columns:repeat(auto-fill,minmax(145px,1fr));gap:8px;margin-top:10px}
+label{font-size:.78rem;color:var(--mut);display:flex;flex-direction:column;gap:3px}
+input,select,button{font:inherit;padding:6px;border:1px solid var(--line);border-radius:6px;background:var(--bg);color:var(--ink)}
+button{cursor:pointer;background:var(--blue);color:#fff;border:0;padding:7px 14px}
+button.alt{background:var(--bg);color:var(--ink);border:1px solid var(--line)}
+:focus-visible{outline:2px solid var(--blue);outline-offset:2px}
+.row{display:flex;gap:10px;align-items:end;flex-wrap:wrap;margin-top:10px}
+.row label{flex:1;min-width:150px}
+.res{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:10px}
+.res div{border:1px solid var(--line);border-radius:8px;padding:8px}
+.res small{display:block;color:var(--mut);font-size:.74rem}.res b{font-size:1.1rem}
+#note{font-size:.8rem;color:var(--mut);margin:8px 0 0}
+</style></head><body>
+<header><h1>Orifice in a tank</h1>
+<p>Water leaves a cylindrical tank through an orifice. Change the inputs and watch the jet and the falling water level. <a href="3d.html" style="color:var(--blue)">Open the 3D version</a></p></header>
+<main>
+<section class="card">
+<canvas id="scene" width="760" height="440"></canvas>
+<div class="row">
+<button id="play">Pause</button><button id="reset" class="alt">Reset</button>
+<label>Speed <span id="spv"></span><input id="speed" type="range" min="0" max="3" step="0.05" value="0"></label>
+</div>
+<div class="inputs">
+<label>Mode<select id="mode"><option value="drain">Draining tank</option><option value="const">Constant head</option></select></label>
+<label>Head above orifice centre (m)<input id="head" type="number" value="1.5" min="0.05" step="0.1"></label>
+<label>Orifice shape<select id="shape"><option value="circle">Circle</option><option value="square">Square</option><option value="rectangle">Rectangle</option><option value="triangle">Triangle</option></select></label>
+<label><span id="la">Diameter (cm)</span><input id="dimA" type="number" value="5" min="0.5" step="0.5"></label>
+<label id="wb"><span id="lb">Height (cm)</span><input id="dimB" type="number" value="5" min="0.5" step="0.5"></label>
+<label>Orifice bottom above ground (m)<input id="zb" type="number" value="1" min="0.05" step="0.1"></label>
+<label>Tank diameter (m)<input id="tank" type="number" value="1" min="0.1" step="0.1"></label>
+<label>Cd preset<select id="preset"><option value="0.61">Sharp-edged (0.61)</option><option value="0.98">Rounded (0.98)</option><option value="custom">Custom</option></select></label>
+<label>Discharge coefficient Cd<input id="cd" type="number" value="0.61" min="0.1" max="1" step="0.01"></label>
+</div>
+</section>
+<section class="card">
+<div class="res">
+<div><small>Head now</small><b id="r_h"></b></div><div><small>Jet velocity</small><b id="r_v"></b></div>
+<div><small>Discharge Q</small><b id="r_q"></b></div><div><small>Jet lands at</small><b id="r_r"></b></div>
+<div><small>Time to empty</small><b id="r_te"></b></div><div><small>Elapsed / water used</small><b id="r_t"></b></div>
+</div>
+<canvas id="graph" width="420" height="260"></canvas>
+<p id="note">Head is measured from the orifice centre. Large openings are sliced, so the deeper part flows faster than the top. Jet velocity uses Cv = 0.98. The draining run stops when the level is almost at the orifice bottom, because the flow keeps slowing down.</p>
+</section>
+</main>
+<script>
+const G=9.81,CV=0.98,$=id=>document.getElementById(id);
+const LAB={circle:['Diameter (cm)'],square:['Side (cm)'],rectangle:['Width (cm)','Height (cm)'],triangle:['Base (cm)','Height (cm)']};
+function geom(sh,a,b){let H,w,yc;
+ if(sh==='circle'){const r=a/2;H=a;yc=r;w=s=>2*Math.sqrt(Math.max(r*r-(s-r)*(s-r),0));}
+ else if(sh==='square'){H=a;yc=a/2;w=()=>a;}
+ else if(sh==='rectangle'){H=b;yc=b/2;w=()=>a;}
+ else{H=b;yc=b/3;w=s=>a*(1-s/b);}
+ return{H,w,yc};}
+function flow(L,g,cd,n=120){const top=Math.min(L,g.H);if(top<=0)return{q:0,A:0};
+ const ds=top/n;let q=0,A=0;
+ for(let i=0;i<n;i++){const s=(i+.5)*ds,w=g.w(s);q+=w*Math.sqrt(2*G*(L-s));A+=w;}
+ return{q:cd*q*ds,A:A*ds};}
+function drain(L0,D,g,cd){const at=Math.PI*D*D/4,Lmin=Math.max(.02*g.H,.001),T=[0],Ls=[L0];let t=0,L=L0;
+ while(L>Lmin&&T.length<5000){const q=flow(L,g,cd,60).q,dt=.01*L*at/q;
+  const qm=flow(Math.max(L-.5*dt*q/at,1e-9),g,cd,60).q;L-=dt*qm/at;t+=dt;T.push(t);Ls.push(Math.max(L,0));}
+ return{T,L:Ls};}
+function levelAt(t){const T=sim.T,Ls=sim.L;if(t>=T[T.length-1])return Ls[Ls.length-1];
+ let lo=0,hi=T.length-1;while(hi-lo>1){const m=(lo+hi)>>1;if(T[m]<=t)lo=m;else hi=m;}
+ return Ls[lo]+(t-T[lo])/(T[hi]-T[lo])*(Ls[hi]-Ls[lo]);}
+function read(){const n=(id,min)=>Math.max(+$(id).value||0,min);
+ return{sh:$('shape').value,a:n('dimA',.5)/100,b:n('dimB',.5)/100,h:n('head',.05),D:n('tank',.1),zb:n('zb',.05),
+  cd:Math.min(Math.max(+$('cd').value||.61,.1),1),mode:$('mode').value};}
+let P,g,L0,sim,tEnd,t=0,playing=true,speed=1,off=0,last=performance.now(),S={};
+function fmtT(s){return s<90?s.toFixed(1)+' s':s<5400?(s/60).toFixed(1)+' min':(s/3600).toFixed(2)+' h';}
+function setup(){
+ P=read();g=geom(P.sh,P.a,P.b);L0=P.h+g.yc;
+ sim=P.mode==='drain'?drain(L0,P.D,g,P.cd):{T:[0],L:[L0]};tEnd=sim.T[sim.T.length-1];
+ const f=flow(L0,g,P.cd,300),v0=f.A>0?CV*f.q/(P.cd*f.A):0,y0=P.zb+Math.min(g.yc,L0/2),R0=v0*Math.sqrt(2*y0/G);
+ const cw=760,ch=440,left=-P.D/2-.1,right=P.D/2+Math.max(R0,.2)*1.05+.1,top=P.zb+L0*1.15+.1;
+ const s=Math.min((cw-40)/(right-left),(ch-40)/top);S={s,left,cw,ch};
+ const sp=P.mode==='drain'?Math.max(1,tEnd/20):1;$('speed').value=Math.min(3,Math.log10(sp));speed=Math.pow(10,+$('speed').value);
+ t=0;playing=true;$('play').textContent='Pause';draw();}
+const X=x=>20+(x-S.left)*S.s,Y=y=>S.ch-20-y*S.s;
+function draw(){
+ const c=$('scene').getContext('2d'),cs=getComputedStyle(document.body),ink=cs.color,mut=cs.getPropertyValue('--mut');
+ const L=levelAt(t),h=L-g.yc,{q,A}=flow(L,g,P.cd),v=A>0?CV*q/(P.cd*A):0,y0=P.zb+Math.min(g.yc,L/2),R=v*Math.sqrt(2*y0/G);
+ c.clearRect(0,0,S.cw,S.ch);
+ c.fillStyle='rgba(120,140,160,.18)';c.fillRect(0,Y(0),S.cw,S.ch-Y(0));
+ c.fillStyle='rgba(120,140,160,.45)';c.fillRect(X(-P.D/2-.05),Y(P.zb),(P.D+.1)*S.s,P.zb*S.s);
+ const wallTop=P.zb+L0*1.12,xl=X(-P.D/2),xr=X(P.D/2);
+ c.fillStyle='rgba(29,116,196,.45)';c.fillRect(xl,Y(P.zb+L),xr-xl,L*S.s);
+ c.strokeStyle=ink;c.lineWidth=3;c.beginPath();
+ c.moveTo(xl,Y(wallTop));c.lineTo(xl,Y(P.zb));c.lineTo(xr,Y(P.zb));
+ if(P.zb+g.H<wallTop){c.moveTo(xr,Y(P.zb+g.H));c.lineTo(xr,Y(wallTop));}c.stroke();
+ c.setLineDash([5,5]);c.lineWidth=1;c.beginPath();c.moveTo(xl,Y(P.zb+L));c.lineTo(xr,Y(P.zb+L));c.stroke();c.setLineDash([]);
+ c.fillStyle=ink;c.font='13px system-ui';c.fillText('head = '+h.toFixed(2)+' m',xl+8,Y(P.zb+L)-6);
+ if(P.mode==='const'){c.strokeStyle='rgba(29,116,196,.8)';c.lineWidth=4;c.beginPath();c.moveTo((xl+xr)/2,Y(wallTop));c.lineTo((xl+xr)/2,Y(P.zb+L));c.stroke();
+  c.fillStyle=mut;c.fillText('inflow keeps the level constant',(xl+xr)/2+8,Y(wallTop)+14);}
+ if(v>.02){const T=Math.sqrt(2*y0/G),lw=Math.max(2,Math.sqrt(4*(q/v)/Math.PI)*S.s);
+  c.save();c.beginPath();c.rect(0,0,S.cw,Y(0));c.clip();
+  const path=()=>{c.beginPath();for(let i=0;i<=60;i++){const tt=T*i/60,px=X(P.D/2+v*tt),py=Y(y0-.5*G*tt*tt);i?c.lineTo(px,py):c.moveTo(px,py);}};
+  path();c.strokeStyle='rgba(29,116,196,.85)';c.lineWidth=lw;c.stroke();
+  path();c.strokeStyle='rgba(255,255,255,.6)';c.lineWidth=Math.max(1,lw*.3);c.setLineDash([10,14]);c.lineDashOffset=off;c.stroke();c.setLineDash([]);
+  c.restore();c.fillStyle='rgba(29,116,196,.6)';c.beginPath();c.ellipse(X(P.D/2+R),Y(0),10+lw,4,0,0,7);c.fill();}
+ // orifice front view
+ const bx=S.cw-110,by=10;c.strokeStyle=mut;c.lineWidth=1;c.strokeRect(bx,by,100,100);
+ let wm=0;for(let i=0;i<=40;i++)wm=Math.max(wm,g.w(g.H*i/40));
+ const k=64/Math.max(g.H,wm),cx=bx+50,cy=by+50;c.beginPath();
+ for(let i=0;i<=40;i++){const sv=g.H*i/40,px=cx-g.w(sv)*k/2,py=cy+(g.H/2-sv)*k;i?c.lineTo(px,py):c.moveTo(px,py);}
+ for(let i=40;i>=0;i--){const sv=g.H*i/40;c.lineTo(cx+g.w(sv)*k/2,cy+(g.H/2-sv)*k);}
+ c.closePath();c.fillStyle='rgba(29,116,196,.35)';c.fill();c.strokeStyle=ink;c.stroke();
+ c.fillStyle=mut;c.font='11px system-ui';c.fillText('orifice (front view)',bx+6,by+96);
+ // results
+ $('r_h').textContent=h.toFixed(2)+' m';$('r_v').textContent=v.toFixed(2)+' m/s';$('r_q').textContent=(q*1000).toFixed(2)+' L/s';
+ $('r_r').textContent=R.toFixed(2)+' m';$('r_te').textContent=P.mode==='drain'?fmtT(tEnd):'not draining';
+ const used=P.mode==='drain'?Math.PI*P.D*P.D/4*(L0-L):q*t;$('r_t').textContent=fmtT(t)+' / '+used.toFixed(2)+' m³';
+ $('spv').textContent='×'+speed.toFixed(speed<10?1:0);drawGraph(L);}
+function drawGraph(L){
+ const c=$('graph').getContext('2d'),W=420,H=260,m={l:50,r:12,t:14,b:36},cs=getComputedStyle(document.body),ink=cs.color,mut=cs.getPropertyValue('--mut');
+ c.clearRect(0,0,W,H);const tm=Math.max(tEnd,1e-6),hmax=L0-g.yc,hmin=Math.min(0,sim.L[sim.L.length-1]-g.yc),span=(hmax-hmin)||1;
+ const px=tt=>m.l+tt/tm*(W-m.l-m.r),py=hh=>H-m.b-(hh-hmin)/span*(H-m.t-m.b);
+ c.strokeStyle=mut;c.lineWidth=1;c.strokeRect(m.l,m.t,W-m.l-m.r,H-m.t-m.b);
+ c.fillStyle=mut;c.font='11px system-ui';c.fillText('head (m)',4,m.t+8);c.fillText(hmax.toFixed(2),12,py(hmax)+4);c.fillText(hmin.toFixed(2),12,py(hmin)+4);
+ if(hmin<0){c.setLineDash([4,4]);c.beginPath();c.moveTo(m.l,py(0));c.lineTo(W-m.r,py(0));c.stroke();c.setLineDash([]);}
+ c.fillText('0',m.l,H-m.b+14);c.fillText(P.mode==='drain'?'time: '+fmtT(tEnd):'constant head: no draining',W-m.r-150,H-m.b+28);
+ c.strokeStyle='#1d74c4';c.lineWidth=2.5;c.beginPath();
+ if(P.mode==='drain'&&sim.T.length>1)sim.T.forEach((tt,i)=>{const x=px(tt),y=py(sim.L[i]-g.yc);i?c.lineTo(x,y):c.moveTo(x,y);});
+ else{c.moveTo(px(0),py(hmax));c.lineTo(px(tm),py(hmax));}
+ c.stroke();const mx=P.mode==='drain'?px(Math.min(t,tm)):px(0);
+ c.fillStyle=ink;c.beginPath();c.arc(mx,py(L-g.yc),5,0,7);c.fill();}
+function frame(now){const dt=Math.min((now-last)/1000,.1);last=now;
+ if(playing){t+=dt*speed;if(P.mode==='drain'&&t>=tEnd){t=tEnd;playing=false;$('play').textContent='Play';}off-=dt*90;}
+ draw();requestAnimationFrame(frame);}
+function labels(){const l=LAB[$('shape').value];$('la').textContent=l[0];$('wb').style.display=l.length>1?'':'none';$('lb').textContent=l[1]||'';}
+$('play').onclick=()=>{if(!playing&&P.mode==='drain'&&t>=tEnd)t=0;playing=!playing;$('play').textContent=playing?'Pause':'Play';};
+$('reset').onclick=setup;$('speed').oninput=()=>{speed=Math.pow(10,+$('speed').value);};
+$('shape').onchange=()=>{labels();setup();};
+$('preset').onchange=()=>{if($('preset').value!=='custom')$('cd').value=$('preset').value;setup();};
+$('cd').oninput=()=>{$('preset').value='custom';};
+['mode','head','dimA','dimB','zb','tank','cd'].forEach(id=>$(id).addEventListener('change',setup));
+labels();setup();requestAnimationFrame(frame);
+</script></body></html>
